@@ -1,0 +1,127 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // ===============================================================
+    // Assumed Data Model
+    // ===============================================================
+    //
+    // Collection: users
+    // Document ID: userId (matches auth.uid)
+    // Fields:
+    //   - email: string (required)
+    //   - name: string (required)
+    //   - role: string (required, enum: ["admin", "sekretariat", "paud", "sd", "smp", "ketenagaan"])
+    //   - createdAt: timestamp (required, immutable)
+    //
+    // Collection: files
+    // Document ID: auto-generated
+    // Fields:
+    //   - name: string (required)
+    //   - size: string (required)
+    //   - type: string (required)
+    //   - unitKey: string (required)
+    //   - seksiName: string (required)
+    //   - aiDescription: string (optional)
+    //   - uploadDate: timestamp (required, immutable)
+    //   - uploadedBy: string (required, matches auth.uid, immutable)
+    //
+    // ===============================================================
+
+    // ===============================================================
+    // Helper Functions
+    // ===============================================================
+    
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+    
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+    
+    function isAdmin() {
+      return isAuthenticated() && 
+        (get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin' ||
+        (request.auth.token.email == "jfperencana.disdik@gmail.com" && request.auth.token.email_verified == true));
+    }
+    
+    function getUserRole() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role;
+    }
+    
+    function hasRequiredFields(fields) {
+      return request.resource.data.keys().hasAll(fields);
+    }
+    
+    function hasOnlyAllowedFields(fields) {
+      return request.resource.data.keys().hasOnly(fields);
+    }
+    
+    function isValidEmail(email) {
+      return email is string && email.matches("^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$");
+    }
+    
+    function isValidUser() {
+      return hasRequiredFields(['email', 'name', 'role', 'createdAt']) &&
+             request.resource.data.email is string && isValidEmail(request.resource.data.email) &&
+             request.resource.data.name is string && request.resource.data.name.size() > 0 && request.resource.data.name.size() < 100 &&
+             request.resource.data.role in ['admin', 'sekretariat', 'paud', 'sd', 'smp', 'ketenagaan'] &&
+             request.resource.data.createdAt is timestamp;
+    }
+    
+    function isValidFileRecord() {
+      return hasRequiredFields(['name', 'size', 'type', 'unitKey', 'seksiName', 'uploadDate', 'uploadedBy']) &&
+             request.resource.data.name is string && request.resource.data.name.size() > 0 && request.resource.data.name.size() < 255 &&
+             request.resource.data.size is string && request.resource.data.size.size() < 50 &&
+             request.resource.data.type is string && request.resource.data.type.size() < 100 &&
+             request.resource.data.unitKey is string && request.resource.data.unitKey in ['sekretariat', 'paud', 'sd', 'smp', 'ketenagaan'] &&
+             request.resource.data.seksiName is string && request.resource.data.seksiName.size() < 100 &&
+             (!('aiDescription' in request.resource.data) || (request.resource.data.aiDescription is string && request.resource.data.aiDescription.size() < 2000)) &&
+             (!('fileUrl' in request.resource.data) || (request.resource.data.fileUrl is string && request.resource.data.fileUrl.size() < 2000)) &&
+             request.resource.data.uploadDate is timestamp &&
+             request.resource.data.uploadedBy is string && request.resource.data.uploadedBy == request.auth.uid;
+    }
+
+    // ===============================================================
+    // Rules
+    // ===============================================================
+
+    match /users/{userId} {
+      // Anyone authenticated can read user profiles (needed for displaying names)
+      allow read: if isAuthenticated();
+      
+      // Users can create their own profile, but only admins can set the role to 'admin'
+      // Default role for new users is 'sekretariat' if not admin
+      allow create: if isOwner(userId) && isValidUser() && 
+                    (isAdmin() || request.resource.data.role != 'admin');
+                    
+      // Only admins can update user roles. Users can update their own name/email.
+      allow update: if isOwner(userId) && isValidUser() && 
+                    request.resource.data.createdAt == resource.data.createdAt &&
+                    (isAdmin() || request.resource.data.role == resource.data.role);
+                    
+      allow delete: if isAdmin();
+    }
+
+    match /files/{fileId} {
+      // Admins can read all files. Users can read files in their unitKey, or all files if they are admin.
+      // For simplicity in this prototype, any authenticated user can read all file metadata.
+      allow read: if isAuthenticated();
+      
+      // Users can only upload files to their own unitKey, unless they are admin
+      allow create: if isAuthenticated() && isValidFileRecord() &&
+                    (isAdmin() || getUserRole() == request.resource.data.unitKey);
+                    
+      // Only the uploader or admin can update the file metadata (e.g., adding AI description)
+      allow update: if isAuthenticated() && isValidFileRecord() &&
+                    (isAdmin() || resource.data.uploadedBy == request.auth.uid) &&
+                    request.resource.data.uploadDate == resource.data.uploadDate &&
+                    request.resource.data.uploadedBy == resource.data.uploadedBy &&
+                    request.resource.data.unitKey == resource.data.unitKey;
+                    
+      // Only uploader or admin can delete
+      allow delete: if isAuthenticated() && (isAdmin() || resource.data.uploadedBy == request.auth.uid);
+    }
+  }
+}

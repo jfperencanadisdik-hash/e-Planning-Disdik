@@ -1,0 +1,43 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "User profile and role information",
+      "type": "object",
+      "properties": {
+        "email": { "type": "string", "format": "email" },
+        "name": { "type": "string" },
+        "role": { "type": "string", "enum": ["admin", "sekretariat", "paud", "sd", "smp", "ketenagaan"] },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["email", "name", "role", "createdAt"]
+    },
+    "FileRecord": {
+      "title": "FileRecord",
+      "description": "Metadata for an uploaded file",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "size": { "type": "string" },
+        "type": { "type": "string" },
+        "unitKey": { "type": "string" },
+        "seksiName": { "type": "string" },
+        "aiDescription": { "type": "string" },
+        "fileUrl": { "type": "string" },
+        "uploadDate": { "type": "string", "format": "date-time" },
+        "uploadedBy": { "type": "string" }
+      },
+      "required": ["name", "size", "type", "unitKey", "seksiName", "uploadDate", "uploadedBy"]
+    }
+  },
+  "firestore": {
+    "users/{userId}": {
+      "schema": { "$ref": "#/entities/User" },
+      "description": "Stores user profiles"
+    },
+    "files/{fileId}": {
+      "schema": { "$ref": "#/entities/FileRecord" },
+      "description": "Stores file metadata"
+    }
+  }
+}
